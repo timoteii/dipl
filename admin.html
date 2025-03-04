@@ -27,6 +27,9 @@
                 <button class="btn btn-danger ms-2" onclick="clearQRCodes()">
                   Очистить лог
                 </button>
+                <button class="btn btn-secondary ms-2" onclick="goBackToHome()">
+                  На главную
+                </button>
               </div>
             </div>
           </div>
@@ -78,6 +81,11 @@
             }
           })
           .catch((error) => console.error("Ошибка очистки QR-кодов:", error));
+      }
+
+      // Функция для возврата на главную страницу
+      function goBackToHome() {
+        window.location.href = "/"; // Перенаправление на главную страницу
       }
 
       // Загрузка QR-кодов при старте
