@@ -71,7 +71,7 @@
         })
           .then((response) => response.json())
           .then((data) => {
-            if (data.message === "QR-коды очищены") {
+            if (data.message === "QR-коды удалены") {
               loadQRCodes(); // Обновляем список после очистки
             } else {
               console.error("Ошибка очистки:", data.message);

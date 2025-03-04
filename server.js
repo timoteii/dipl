@@ -4,30 +4,35 @@ const { google } = require("googleapis");
 const bodyParser = require("body-parser");
 const path = require("path");
 const QRCode = require("qrcode");
-const fs = require("fs");
+const { Pool } = require("pg");
 
 const app = express();
-const port = 8080;
+const port = process.env.PORT || 8080;
 
-// Настройка UTF-8 для корректной передачи данных
 app.use(bodyParser.json({ limit: "10mb", type: "application/json" }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Установка заголовков для корректной работы с UTF-8
 app.use((req, res, next) => {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   next();
 });
 
-// Настройка OAuth2 для отправки почты
+// Чтение переменных окружения
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 const REFRESH_TOKEN = process.env.REFRESH_TOKEN;
+const DATABASE_URL = process.env.DATABASE_URL;
 
-if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI || !REFRESH_TOKEN) {
+if (
+  !CLIENT_ID ||
+  !CLIENT_SECRET ||
+  !REDIRECT_URI ||
+  !REFRESH_TOKEN ||
+  !DATABASE_URL
+) {
   console.error("Одна или несколько переменных окружения не настроены!");
-  process.exit(1); // Завершаем процесс, если переменные отсутствуют
+  process.exit(1);
 }
 
 const oAuth2Client = new google.auth.OAuth2(
@@ -37,20 +42,11 @@ const oAuth2Client = new google.auth.OAuth2(
 );
 oAuth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
 
-// Функция для чтения данных из JSON
-function readData() {
-  try {
-    const data = fs.readFileSync("qrcodes.json", "utf-8");
-    return JSON.parse(data);
-  } catch (error) {
-    return []; // Если файла нет, возвращаем пустой массив
-  }
-}
-
-// Функция для записи данных в JSON
-function writeData(data) {
-  fs.writeFileSync("qrcodes.json", JSON.stringify(data, null, 2));
-}
+// Настройка подключения к PostgreSQL
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // Для Railway
+});
 
 async function sendMail(to, subject, text, html, attachment) {
   try {
@@ -92,7 +88,6 @@ async function sendMail(to, subject, text, html, attachment) {
   }
 }
 
-// API для отправки письма с QR-кодом
 app.post("/send-email", async (req, res) => {
   const { surname, name, email } = req.body;
 
@@ -115,56 +110,97 @@ app.post("/send-email", async (req, res) => {
   }
 });
 
-// Эндпоинт для получения QR-кодов от ESP32-CAM
-app.post("/receive-qr", (req, res) => {
+app.post("/receive-qr", async (req, res) => {
   const { qrCodeData } = req.body;
   if (!qrCodeData) {
     return res.status(400).json({ message: "Нет данных QR-кода" });
   }
 
-  const qrcodes = readData();
-  qrcodes.push({ data: qrCodeData, timestamp: new Date().toISOString() });
-  writeData(qrcodes);
+  try {
+    const client = await pool.connect();
+    const checkQuery = "SELECT COUNT(*) FROM qrcodes WHERE data = $1";
+    const checkResult = await client.query(checkQuery, [qrCodeData]);
+    const isDuplicate = parseInt(checkResult.rows[0].count) > 0;
 
-  res.status(200).json({ message: "QR-код сохранен", data: qrCodeData });
+    if (!isDuplicate) {
+      const insertQuery =
+        "INSERT INTO qrcodes (data, timestamp) VALUES ($1, $2)";
+      await client.query(insertQuery, [qrCodeData, new Date().toISOString()]);
+      console.log("New QR code saved:", qrCodeData);
+    } else {
+      console.log("Duplicate QR code detected, not saved:", qrCodeData);
+    }
+
+    client.release();
+    res
+      .status(200)
+      .json({ message: "QR-код обработан", data: qrCodeData, isDuplicate });
+  } catch (error) {
+    console.error("Ошибка работы с базой данных:", error);
+    res.status(500).json({ message: "Ошибка сервера", error: error.message });
+  }
 });
 
-// Раздача статических файлов и маршруты
+app.post("/clear-qrcodes", async (req, res) => {
+  try {
+    const client = await pool.connect();
+    await client.query("DELETE FROM qrcodes");
+    client.release();
+    res.status(200).json({ message: "QR-коды удалены" });
+  } catch (error) {
+    console.error("Ошибка очистки базы данных:", error);
+    res.status(500).json({ message: "Ошибка сервера", error: error.message });
+  }
+});
+
 app.use(express.static(path.join(__dirname)));
 
-// Главная страница
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "main.html"), {
     headers: { "Content-Type": "text/html; charset=utf-8" },
   });
 });
 
-// Страница авторизации
 app.get("/login", (req, res) => {
   res.sendFile(path.join(__dirname, "login.html"), {
     headers: { "Content-Type": "text/html; charset=utf-8" },
   });
 });
 
-// Панель управления
 app.get("/admin", (req, res) => {
   res.sendFile(path.join(__dirname, "admin.html"), {
     headers: { "Content-Type": "text/html; charset=utf-8" },
   });
 });
 
-app.post("/clear-qrcodes", (req, res) => {
-  writeData([]); // Очищаем массив, записываем пустой
-  res.status(200).json({ message: "QR-коды очищены" });
+app.get("/get-qrcodes", async (req, res) => {
+  try {
+    const client = await pool.connect();
+    const result = await client.query(
+      "SELECT data, timestamp FROM qrcodes ORDER BY timestamp DESC"
+    );
+    client.release();
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Ошибка получения данных:", error);
+    res.status(500).json({ message: "Ошибка сервера", error: error.message });
+  }
 });
 
-// Эндпоинт для отображения сохраненных QR-кодов на панели
-app.get("/get-qrcodes", (req, res) => {
-  const qrcodes = readData();
-  res.json(qrcodes);
-});
+app.listen(port, () => {
+  console.log(`Сервер запущен на порту ${port}`);
 
-// Запуск сервера
-app.listen(port, "0.0.0.0", () => {
-  console.log(`Сервер запущен на http://127.0.0.1:${port}`);
+  // Инициализация таблицы qrcodes, если она не существует
+  pool.query(
+    `
+    CREATE TABLE IF NOT EXISTS qrcodes (
+      id SERIAL PRIMARY KEY,
+      data TEXT NOT NULL UNIQUE,
+      timestamp TIMESTAMP NOT NULL
+    )`,
+    (err) => {
+      if (err) console.error("Ошибка создания таблицы:", err);
+      else console.log("Таблица qrcodes готова или уже существует");
+    }
+  );
 });
