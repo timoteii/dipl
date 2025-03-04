@@ -20,12 +20,15 @@ app.use((req, res, next) => {
 });
 
 // Настройка OAuth2 для отправки почты
-const CLIENT_ID =
-  "776115588861-0ol3kloqn5g5jslf2g9bskp5fcv7kg1p.apps.googleusercontent.com";
-const CLIENT_SECRET = "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";
-const REDIRECT_URI = "https://developers.google.com/oauthplayground";
-const REFRESH_TOKEN =
-  "1//046zKoj8c7elvCgYIARAAGAQSNwF-L9Ir2hqqrXywkOnDgxywEpmKL21VBeNnbwEcfpYQr_IqWN2VMjGhca219VTK7xn_YnIshzY";
+const CLIENT_ID = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;
+const REDIRECT_URI = process.env.REDIRECT_URI;
+const REFRESH_TOKEN = process.env.REFRESH_TOKEN;
+
+if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI || !REFRESH_TOKEN) {
+  console.error("Одна или несколько переменных окружения не настроены!");
+  process.exit(1); // Завершаем процесс, если переменные отсутствуют
+}
 
 const oAuth2Client = new google.auth.OAuth2(
   CLIENT_ID,
