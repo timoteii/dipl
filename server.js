@@ -150,6 +150,11 @@ app.get("/admin", (req, res) => {
   });
 });
 
+app.post("/clear-qrcodes", (req, res) => {
+  writeData([]); // Очищаем массив, записываем пустой
+  res.status(200).json({ message: "QR-коды очищены" });
+});
+
 // Эндпоинт для отображения сохраненных QR-кодов на панели
 app.get("/get-qrcodes", (req, res) => {
   const qrcodes = readData();

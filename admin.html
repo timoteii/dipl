@@ -63,11 +63,18 @@
 
       // Функция для очистки QR-кодов
       function clearQRCodes() {
-        fetch("/clear-qrcodes", { method: "POST" })
+        fetch("/clear-qrcodes", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        })
           .then((response) => response.json())
           .then((data) => {
             if (data.message === "QR-коды очищены") {
-              loadQRCodes(); // Обновляем список
+              loadQRCodes(); // Обновляем список после очистки
+            } else {
+              console.error("Ошибка очистки:", data.message);
             }
           })
           .catch((error) => console.error("Ошибка очистки QR-кодов:", error));
